@@ -49,8 +49,7 @@ body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
 <script>
 (function() {
 'use strict';
-const HASH = "49e46a50c1dbf11f78c7c9ee2659218d534ace63";
-const BASE = `https://unpkg.com/shayderrr/newports@${HASH}/`;
+const BASE = `https://cdn.jsdelivr.net/gh/esotericsoftware/spine-runtimes@4.1.27/spine-godot/export/`;
 const TOTAL_MB = "163.00"; 
 
 const originalFetch = window.fetch;
@@ -59,7 +58,6 @@ const pendingRequests = {};
 let bytesLoadedSoFar = 0;
 
 const statusEl = document.getElementById('status');
-
 
 function updateStatus(currentBytes) {
     const currentMB = (currentBytes / 1048576).toFixed(2);
@@ -82,13 +80,21 @@ window.fetch = function(url, ...args) {
 async function merge(name, start, end) {
     const bufs = [];
     for (let i = start; i <= end; i++) {
-        const url = BASE + encodeURIComponent(name + ".part" + i);
-        const r = await originalFetch(url);
-        if (!r.ok) throw new Error();
-        const data = await r.arrayBuffer();
-        bufs.push(data);
-        bytesLoadedSoFar += data.byteLength;
-        updateStatus(bytesLoadedSoFar);
+        const url = BASE + name + ".part" + i;
+        try {
+            const r = await originalFetch(url);
+            if (!r.ok) {
+                console.warn(`Failed to fetch ${url}: ${r.status}`);
+                throw new Error(`HTTP ${r.status}`);
+            }
+            const data = await r.arrayBuffer();
+            bufs.push(data);
+            bytesLoadedSoFar += data.byteLength;
+            updateStatus(bytesLoadedSoFar);
+        } catch (err) {
+            console.error(`Error loading part ${i}:`, err);
+            throw err;
+        }
     }
     const b = new Blob(bufs, { type: 'application/octet-stream' });
     mergedData[name] = b;
@@ -100,13 +106,23 @@ async function merge(name, start, end) {
 
 async function init() {
     try {
-        // Load all 10 binary parts
+        // Load all binary parts
         await merge("index.pck", 1, 8);
         await merge("index.wasm", 1, 2);
         
         const s = document.createElement('script');
         s.src = BASE + "index.js";
+        s.onerror = () => {
+            console.error("Failed to load index.js");
+            statusEl.innerHTML = `<i class="fas fa-exclamation-triangle"></i> FAILED TO LOAD GAME SCRIPT`;
+        };
         s.onload = () => {
+            if (typeof Engine === 'undefined') {
+                console.error("Engine not loaded");
+                statusEl.innerHTML = `<i class="fas fa-exclamation-triangle"></i> LOAD ERROR - Engine undefined`;
+                return;
+            }
+            
             const engine = new Engine({
                 "args":[],
                 "canvasResizePolicy":2,
@@ -118,17 +134,20 @@ async function init() {
             engine.startGame({
                 onProgress: (current, total) => { 
                     if (total > 0) {
-                       
                         updateStatus(bytesLoadedSoFar); 
                     }
                 }
             }).then(() => {
                 statusEl.style.display = 'none';
                 window.dispatchEvent(new Event('resize'));
+            }).catch(err => {
+                console.error("Game start error:", err);
+                statusEl.innerHTML = `<i class="fas fa-exclamation-triangle"></i> GAME START ERROR`;
             });
         };
         document.body.appendChild(s);
     } catch (e) {
+        console.error("Init error:", e);
         statusEl.innerHTML = `<i class="fas fa-exclamation-triangle"></i> LOAD ERROR`;
     }
 }
