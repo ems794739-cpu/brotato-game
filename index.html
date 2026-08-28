@@ -64,6 +64,11 @@ function updateStatus(currentBytes) {
     statusEl.innerHTML = `<i class="fas fa-sync-alt fa-spin"></i> LOADING: ${currentMB} / ${TOTAL_MB} MB`;
 }
 
+function showLoadError(msg, details) {
+    console.error(msg, details || '');
+    statusEl.innerHTML = `<i class="fas fa-exclamation-triangle"></i> LOAD ERROR` + (msg ? `: ${msg}` : '');
+}
+
 window.fetch = function(url, ...args) {
     const u = url.toString();
     if (u.includes("index.pck") || u.includes("index.wasm")) {
@@ -104,15 +109,31 @@ async function merge(name, start, end) {
     }
 }
 
+async function tryUrls(urls) {
+    for (const url of urls) {
+        try {
+            const r = await originalFetch(url);
+            if (r.ok) return {url, res: r};
+            console.warn(`tryUrls: ${url} returned ${r.status}`);
+        } catch (e) {
+            console.warn(`tryUrls: failed to fetch ${url}`, e);
+        }
+    }
+    return null;
+}
+
 async function init() {
     try {
-        // Try fetching full files first; if unavailable, fallback to parts
+        // Attempt order:
+        // 1) CDN full file (BASE + name)
+        // 2) Relative file in same repo (./name)
+        // 3) Fallback to parts at CDN (BASE + name.partN)
         async function fetchFullOrParts(name, partStart, partEnd) {
-            try {
-                const url = BASE + name;
-                const r = await originalFetch(url);
-                if (r.ok) {
-                    const data = await r.arrayBuffer();
+            const candidateUrls = [BASE + name, './' + name];
+            const found = await tryUrls(candidateUrls);
+            if (found) {
+                try {
+                    const data = await found.res.arrayBuffer();
                     bytesLoadedSoFar += data.byteLength;
                     updateStatus(bytesLoadedSoFar);
                     mergedData[name] = new Blob([data], { type: 'application/octet-stream' });
@@ -120,13 +141,14 @@ async function init() {
                         pendingRequests[name].forEach(res => res(new Response(mergedData[name])));
                         delete pendingRequests[name];
                     }
+                    console.log(`Loaded ${name} from ${found.url}`);
                     return;
-                } else {
-                    console.warn(`Full fetch failed for ${url}: ${r.status}, falling back to parts`);
+                } catch (e) {
+                    console.warn(`Failed to read arrayBuffer for ${found.url}:`, e);
                 }
-            } catch (e) {
-                console.warn(`Full fetch error for ${name}:`, e);
             }
+            // fallback to parts
+            console.log(`Falling back to parts for ${name}`);
             await merge(name, partStart, partEnd);
         }
 
@@ -135,14 +157,13 @@ async function init() {
         
         const s = document.createElement('script');
         s.src = BASE + "index.js";
-        s.onerror = () => {
-            console.error("Failed to load index.js");
-            statusEl.innerHTML = `<i class="fas fa-exclamation-triangle"></i> FAILED TO LOAD GAME SCRIPT`;
+        s.onerror = (ev) => {
+            console.error("Failed to load index.js", ev);
+            statusEl.innerHTML = `<i class="fas fa-exclamation-triangle"></i> FAILED TO LOAD GAME SCRIPT (${s.src})`;
         };
         s.onload = () => {
             if (typeof Engine === 'undefined') {
-                console.error("Engine not loaded");
-                statusEl.innerHTML = `<i class="fas fa-exclamation-triangle"></i> LOAD ERROR - Engine undefined`;
+                showLoadError('Engine not loaded', 'index.js executed but Engine is undefined');
                 return;
             }
             
@@ -172,6 +193,18 @@ async function init() {
     } catch (e) {
         console.error("Init error:", e);
         statusEl.innerHTML = `<i class="fas fa-exclamation-triangle"></i> LOAD ERROR`;
+        // Provide actionable hint
+        const hint = document.createElement('div');
+        hint.style.position = 'absolute';
+        hint.style.top = '70px';
+        hint.style.left = '0';
+        hint.style.width = '100%';
+        hint.style.textAlign = 'center';
+        hint.style.color = '#fff';
+        hint.style.fontFamily = 'Arial, sans-serif';
+        hint.style.fontSize = '14px';
+        hint.innerText = 'Hint: The game assets (index.pck / index.wasm / index.js) were not found at the CDN. Place those files next to index.html or host them at the CDN and update BASE.';
+        document.body.appendChild(hint);
     }
 }
 init();
