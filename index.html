@@ -49,7 +49,9 @@ body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
 <script>
 (function() {
 'use strict';
-const BASE = `https://cdn.jsdelivr.net/gh/esotericsoftware/spine-runtimes@4.1.27/spine-godot/export/`;
+// Use a public web-build (fan/clone) that hosts index.js/index.wasm/index.pck - allows the page to load for testing.
+// If you have official builds, replace BASE with your host or place files next to index.html.
+const BASE = `https://raw.githubusercontent.com/Godasy0725/brotato/main/`;
 const TOTAL_MB = "163.00"; 
 
 const originalFetch = window.fetch;
