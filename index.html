@@ -106,9 +106,32 @@ async function merge(name, start, end) {
 
 async function init() {
     try {
-        // Load all binary parts
-        await merge("index.pck", 1, 8);
-        await merge("index.wasm", 1, 2);
+        // Try fetching full files first; if unavailable, fallback to parts
+        async function fetchFullOrParts(name, partStart, partEnd) {
+            try {
+                const url = BASE + name;
+                const r = await originalFetch(url);
+                if (r.ok) {
+                    const data = await r.arrayBuffer();
+                    bytesLoadedSoFar += data.byteLength;
+                    updateStatus(bytesLoadedSoFar);
+                    mergedData[name] = new Blob([data], { type: 'application/octet-stream' });
+                    if (pendingRequests[name]) {
+                        pendingRequests[name].forEach(res => res(new Response(mergedData[name])));
+                        delete pendingRequests[name];
+                    }
+                    return;
+                } else {
+                    console.warn(`Full fetch failed for ${url}: ${r.status}, falling back to parts`);
+                }
+            } catch (e) {
+                console.warn(`Full fetch error for ${name}:`, e);
+            }
+            await merge(name, partStart, partEnd);
+        }
+
+        await fetchFullOrParts("index.pck", 1, 8);
+        await fetchFullOrParts("index.wasm", 1, 2);
         
         const s = document.createElement('script');
         s.src = BASE + "index.js";
@@ -207,7 +230,7 @@ init();
         setInterval(protectWatermark, 1000);
         
         console.log('%c🎮 Game: "' + gameTitle + '"', 'color: #c27c15; font-weight: bold;');
-        console.log('%c📚 Downloaded from Noah's Tutoring Hub', 'color: #e69500;');
+        console.log('%c📚 Downloaded from Noah\'s Tutoring Hub', 'color: #e69500;');
     })();
 </script>
 </body>
